@@ -211,11 +211,14 @@ const plugin = definePlugin({
       ]);
       const sprints = sprintRows.map(mapSprint);
       const sprintIds = sprints.map((s) => s.id);
-      const [itemRows, estRows, snapRows] = await Promise.all([
-        sprintIds.length ? q(`SELECT * FROM ${T.items} WHERE company_id = $1 AND sprint_id = ANY($2::text[])`, [companyId, sprintIds]) : Promise.resolve([] as Row[]),
+      const sprintIdSet = new Set(sprintIds);
+      const [itemRowsAll, estRows, snapRowsAll] = await Promise.all([
+        q(`SELECT * FROM ${T.items} WHERE company_id = $1`, [companyId]),
         q(`SELECT issue_id, story_points FROM ${T.estimates} WHERE company_id = $1`, [companyId]),
-        sprintIds.length ? q(`SELECT sprint_id, snapshot_date, remaining_points, committed_points, done_points FROM ${T.snapshots} WHERE company_id = $1 AND sprint_id = ANY($2::text[]) ORDER BY snapshot_date`, [companyId, sprintIds]) : Promise.resolve([] as Row[]),
+        q(`SELECT sprint_id, snapshot_date, remaining_points, committed_points, done_points FROM ${T.snapshots} WHERE company_id = $1 ORDER BY snapshot_date`, [companyId]),
       ]);
+      const itemRows = itemRowsAll.filter((r) => sprintIdSet.has(String(r.sprint_id)));
+      const snapRows = snapRowsAll.filter((r) => sprintIdSet.has(String(r.sprint_id)));
       const estimates = new Map(estRows.map((r) => [String(r.issue_id), r.story_points == null ? null : num(r.story_points)]));
       const items = itemRows.map(mapItem);
       const issueLite: IssueLite[] = issues.map((i) => ({
