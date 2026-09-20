@@ -1,0 +1,29 @@
+{
+  "name": "paperclip-plugin-product-lifecycle",
+  "version": "0.1.0",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "files": ["dist", "migrations", "README.md"],
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --import tsx test/*.test.ts"
+  },
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "2026.722.0",
+    "@types/node": "^22.19.21",
+    "@types/react": "^19.2.17",
+    "esbuild": "^0.25.0",
+    "react": "^19.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": { "react": ">=18" }
+}

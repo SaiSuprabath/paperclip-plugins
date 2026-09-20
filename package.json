@@ -1,0 +1,20 @@
+{
+  "name": "paperclip-plugins",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Paperclip plugins: Project Manager (Gantt, critical path, resource planning) and Product Lifecycle (sprints, change management)",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
