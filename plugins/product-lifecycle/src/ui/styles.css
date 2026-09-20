@@ -133,7 +133,7 @@
 .pl-tl-item .pl-tl-time { font-size: 11px; color: var(--muted-foreground); }
 
 /* Sprint board */
-.pl-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.pl-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .pl-col { border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); display: flex; flex-direction: column; min-height: 200px; }
 .pl-col-head { padding: 8px 10px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-foreground); display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .pl-col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; flex: 1; }

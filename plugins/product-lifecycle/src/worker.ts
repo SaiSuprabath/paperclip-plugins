@@ -552,9 +552,9 @@ const plugin = definePlugin({
         status: "backlog",
         assigneeAgentId: typeof params.assigneeAgentId === "string" && params.assigneeAgentId ? params.assigneeAgentId : undefined,
         assigneeUserId: typeof params.assigneeUserId === "string" && params.assigneeUserId ? params.assigneeUserId : undefined,
-        originKind: "plugin",
-        originId: "suprabath.product-lifecycle",
-        actor: actionCtx.actor.userId ? ({ actorType: "user", actorId: actionCtx.actor.userId } as never) : undefined,
+        originKind: "plugin:suprabath.product-lifecycle:backlog",
+        originId: projectId,
+        actor: actionCtx.actor.userId || actionCtx.actor.agentId ? { actorUserId: actionCtx.actor.userId, actorAgentId: actionCtx.actor.agentId, actorRunId: actionCtx.actor.runId } : undefined,
       } as never);
       if (params.storyPoints != null && params.storyPoints !== "") {
         await x(`INSERT INTO ${T.estimates} (issue_id, company_id, story_points, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (issue_id) DO UPDATE SET story_points = $3, updated_at = now()`, [issue.id, companyId, Math.round(num(params.storyPoints))]);
@@ -650,8 +650,9 @@ const plugin = definePlugin({
           status: "todo",
           assigneeAgentId: cr.ownerAgentId ?? undefined,
           assigneeUserId: cr.ownerUserId ?? undefined,
-          originKind: "plugin",
-          originId: "suprabath.product-lifecycle",
+          originKind: "plugin:suprabath.product-lifecycle:change-request",
+          originId: id,
+          actor: actionCtx.actor.userId || actionCtx.actor.agentId ? { actorUserId: actionCtx.actor.userId, actorAgentId: actionCtx.actor.agentId, actorRunId: actionCtx.actor.runId } : undefined,
         } as never);
         implementationIssueId = issue.id;
         await x(`UPDATE ${T.crs} SET implementation_issue_id = $1, updated_at = now() WHERE id = $2 AND company_id = $3`, [issue.id, id, companyId]);

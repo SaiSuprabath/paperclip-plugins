@@ -503,9 +503,9 @@ const plugin = definePlugin({
         status: "todo",
         assigneeAgentId: typeof params.assigneeAgentId === "string" && params.assigneeAgentId ? params.assigneeAgentId : undefined,
         assigneeUserId: typeof params.assigneeUserId === "string" && params.assigneeUserId ? params.assigneeUserId : undefined,
-        originKind: "plugin",
-        originId: "suprabath.project-manager",
-        actor: actionCtx.actor.userId ? { actorType: "user", actorId: actionCtx.actor.userId } as never : undefined,
+        originKind: "plugin:suprabath.project-manager:task",
+        originId: projectId,
+        actor: actionCtx.actor.userId || actionCtx.actor.agentId ? { actorUserId: actionCtx.actor.userId, actorAgentId: actionCtx.actor.agentId, actorRunId: actionCtx.actor.runId } : undefined,
       } as never);
       const countRows = await q<{ c: number }>(`SELECT count(*)::int AS c FROM ${T.tasks} WHERE project_id = $1`, [projectId]);
       await x(
