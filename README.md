@@ -49,10 +49,18 @@ Upgrade later with `git pull && pnpm build && npx paperclipai plugin upgrade <pl
 
 ```bash
 pnpm install
-pnpm --filter paperclip-plugin-project-manager dev     # rebuilds dist/ on change; Paperclip reloads the worker
+pnpm --filter paperclip-plugin-project-manager dev     # rebuilds dist/ on change
 pnpm --filter paperclip-plugin-product-lifecycle dev
 pnpm test        # unit tests (CPM engine, change-request state machine)
 pnpm typecheck
+```
+
+After a rebuild, reload the running worker so the host picks up the new `dist/` (the UI bundle is
+re-fetched on the next page load):
+
+```bash
+npx paperclipai plugin list                    # shows each plugin's id
+npx paperclipai plugin upgrade <pluginId>      # re-reads the local package and restarts the worker
 ```
 
 Each plugin has the same layout:
