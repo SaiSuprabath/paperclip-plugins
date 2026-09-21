@@ -20,7 +20,7 @@ Paperclip heartbeat, and status changes made by agents flow back into the Gantt 
 ## Install into any Paperclip company
 
 ```bash
-git clone https://github.com/<you>/paperclip-plugins.git
+git clone https://github.com/SaiSuprabath/paperclip-plugins.git
 cd paperclip-plugins
 pnpm install
 pnpm build
