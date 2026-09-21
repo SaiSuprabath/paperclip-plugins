@@ -52,7 +52,12 @@ export function registerPmOffice({ ctx, T, q, x, buildPlan, requireString }: PmO
     const resAgg = new Map<string, ResourceCostRow>();
     for (const t of plan.tasks) {
       if (t.isSummary) continue;
-      const asg = plan.assignments.filter((a) => a.issueId === t.issueId);
+      let asg = plan.assignments.filter((a) => a.issueId === t.issueId);
+      if (asg.length === 0) {
+        // Fall back to the Paperclip assignee's resource (agent or linked user) so every assigned task carries a cost.
+        const implicit = plan.resources.find((r) => (t.assigneeAgentId && r.agentId === t.assigneeAgentId) || (t.assigneeUserId && r.userId === t.assigneeUserId));
+        if (implicit) asg = [{ id: `implicit-${t.issueId}`, issueId: t.issueId, resourceId: implicit.id, unitsPct: 100 }];
+      }
       const baseHours = t.effortHours ?? (t.isMilestone ? 0 : t.durationDays * hoursPerDay);
       let plannedHours = 0;
       let plannedCost = 0;
