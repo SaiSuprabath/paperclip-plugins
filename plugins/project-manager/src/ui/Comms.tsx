@@ -93,9 +93,9 @@ export function CommsView(p: CommsProps) {
             <div className="pm-kpi"><div className="pm-kpi-label">Budget</div><div className="pm-kpi-value">{money(m.ac, cur)}</div><div className="pm-kpi-hint">of {money(m.bac, cur)} · EAC {money(m.eac, cur)}</div></div>
             <div className={`pm-kpi ${overdueDue.length ? "pm-warn-kpi" : ""}`}><div className="pm-kpi-label">Communications due</div><div className="pm-kpi-value">{overdueDue.length}</div><div className="pm-kpi-hint">{comms.reports[0] ? `last report ${fmtDate(comms.reports[0].periodEnd)} ${rag(comms.reports[0].rag)}` : "no report yet"} · {comms.nudges.length} nudges sent</div></div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(420px, 1.4fr) minmax(280px, 1fr)", gap: 12 }}>
             <div className="pm-card">
-              <div className="pm-card-head">Nudge center <span className="pm-sub">agents get a comment + wake-up run · humans get a comment + email</span><span className="pm-spacer" />
+              <div className="pm-card-head" title="Agents get a comment on the issue plus a wake-up run; humans get a comment plus an email">Nudge center<span className="pm-spacer" />
                 <button className="pm-btn" disabled={p.busy || !comms.attention.some((a) => a.kind === "overdue" && a.ownerKind !== "none")} onClick={async () => { const r = await p.onNudgeAll(["overdue"]); p.toast(`Nudged ${r.count} owner(s) of overdue tasks`); }}>Nudge all overdue</button>
               </div>
               <table className="pm-table">
