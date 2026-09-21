@@ -157,7 +157,8 @@ const plugin = definePlugin({
         if (page.length < 200) break;
         offset += 200;
       }
-      return out.filter((i) => !i.archivedAt);
+      // Cancelled issues are not scheduled (deleting a task from the plan cancels its issue).
+      return out.filter((i) => !i.archivedAt && i.status !== "cancelled");
     }
 
     // ----------------------------------------------------------------------
