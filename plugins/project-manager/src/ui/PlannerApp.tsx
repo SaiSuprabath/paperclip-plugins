@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHostLocation, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
 import type { LinkType, Resource } from "../shared/types.js";
-import { useAction, usePlan, useProjects, useToasts } from "./api.js";
+import { useAction, useComms, useEvm, usePlan, useProjects, useToasts } from "./api.js";
 import { Gantt, type Zoom, type PredecessorSpec } from "./Gantt.js";
 import { TaskEditor } from "./TaskEditor.js";
 import { ResourceSheet, ResourceUsage } from "./Resources.js";
 import { CriticalPathView } from "./CriticalPath.js";
+import { EvmView } from "./Evm.js";
+import { CommsView } from "./Comms.js";
 import { fmtDate, fmtDateFull } from "./util.js";
 
-type View = "gantt" | "critical" | "sheet" | "usage";
+type View = "gantt" | "critical" | "sheet" | "usage" | "evm" | "comms";
 
 export interface PlannerAppProps {
   companyId: string | null;
@@ -28,10 +30,12 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
   }, [projects.data, projectId]);
 
   const plan = usePlan(companyId, projectId);
-  const refresh = useCallback(() => { plan.refresh?.(); }, [plan]);
+  const [view, setView] = useState<View>("gantt");
+  const evm = useEvm(companyId, projectId, view === "evm" || view === "comms");
+  const comms = useComms(companyId, projectId, view === "comms");
+  const refresh = useCallback(() => { plan.refresh?.(); if (view === "evm") evm.refresh?.(); if (view === "comms") { evm.refresh?.(); comms.refresh?.(); } }, [plan, evm, comms, view]);
   const { toasts, push } = useToasts();
 
-  const [view, setView] = useState<View>("gantt");
   const [zoom, setZoom] = useState<Zoom>("week");
   const [showCritical, setShowCritical] = useState(true);
   const [showBaseline, setShowBaseline] = useState(true);
@@ -64,7 +68,20 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
   const assignByNames = useAction("assign-by-names", companyId, refresh, push);
   const insertTask = useAction("insert-task", companyId, refresh, push);
   const deleteTask = useAction("delete-task", companyId, refresh, push);
-  const busy = [updateTask, setLink, removeLink, assign, createTask, removeTask, reorder, saveBaseline, clearBaseline, level, clearLeveling, upsertResource, deleteResource, importAgents, updateCalendar, updatePlan, setPredecessors, assignByNames, insertTask, deleteTask].some((a) => a.busy);
+  const updateSettings = useAction("update-project-settings", companyId, refresh, push);
+  const updateTaskCosts = useAction("update-task-costs", companyId, refresh, push);
+  const recordStatus = useAction("record-status", companyId, refresh, push);
+  const genReport = useAction("generate-status-report", companyId, refresh, push);
+  const sendReport = useAction("send-status-report", companyId, undefined, push);
+  const nudgeOne = useAction("nudge", companyId, refresh, push);
+  const nudgeAll = useAction("nudge-all", companyId, refresh, push);
+  const upStake = useAction("upsert-stakeholder", companyId, refresh, push);
+  const delStake = useAction("delete-stakeholder", companyId, refresh, push);
+  const upComm = useAction("upsert-comm-item", companyId, refresh, push);
+  const delComm = useAction("delete-comm-item", companyId, refresh, push);
+  const upRaid = useAction("upsert-raid-item", companyId, refresh, push);
+  const delRaid = useAction("delete-raid-item", companyId, refresh, push);
+  const busy = [updateSettings, updateTaskCosts, recordStatus, genReport, sendReport, nudgeOne, nudgeAll, upStake, delStake, upComm, delComm, upRaid, delRaid, updateTask, setLink, removeLink, assign, createTask, removeTask, reorder, saveBaseline, clearBaseline, level, clearLeveling, upsertResource, deleteResource, importAgents, updateCalendar, updatePlan, setPredecessors, assignByNames, insertTask, deleteTask].some((a) => a.busy);
 
   const data = plan.data;
   const selected = data?.tasks.find((t) => t.issueId === selectedId) ?? null;
@@ -132,6 +149,8 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
           <button className={view === "critical" ? "pm-active" : ""} onClick={() => setView("critical")}>Critical Path</button>
           <button className={view === "sheet" ? "pm-active" : ""} onClick={() => setView("sheet")}>Resource Sheet</button>
           <button className={view === "usage" ? "pm-active" : ""} onClick={() => setView("usage")}>Resource Usage</button>
+          <button className={view === "evm" ? "pm-active" : ""} onClick={() => setView("evm")}>S-Curve & Budget</button>
+          <button className={view === "comms" ? "pm-active" : ""} onClick={() => setView("comms")}>Communications</button>
         </div>
         {view === "gantt" && (
           <>
@@ -224,6 +243,26 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
             />
           )}
           {data && view === "critical" && <CriticalPathView plan={data} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); }} />}
+          {data && view === "evm" && (
+            <EvmView plan={data} evm={evm.data ?? null} loading={evm.loading} busy={busy}
+              onUpdateSettings={(patch) => updateSettings.fn({ projectId, patch }, "Settings saved")}
+              onUpdateTaskCosts={(issueId, patch) => updateTaskCosts.fn({ issueId, patch })}
+              onRecordStatus={() => recordStatus.fn({ projectId }, "Status snapshot recorded")} />
+          )}
+          {data && view === "comms" && (
+            <CommsView plan={data} comms={comms.data ?? null} loading={comms.loading} busy={busy} toast={push}
+              onGenerateReport={() => genReport.fn({ projectId })}
+              onSendReport={(reportId, to) => sendReport.fn({ reportId, to }) as Promise<{ sent: boolean; mailto: string; error?: string }>}
+              onNudge={(issueId, message) => nudgeOne.fn({ projectId, issueId, message }) as Promise<{ channel: string; mailto?: string; queued?: boolean; error?: string }>}
+              onNudgeAll={(kinds) => nudgeAll.fn({ projectId, kinds }) as Promise<{ count: number }>}
+              onUpsertStakeholder={(item) => upStake.fn({ projectId, item })}
+              onDeleteStakeholder={(id) => delStake.fn({ id })}
+              onUpsertComm={(item) => upComm.fn({ projectId, item })}
+              onDeleteComm={(id) => delComm.fn({ id })}
+              onUpsertRaid={(item) => upRaid.fn({ projectId, item })}
+              onDeleteRaid={(id) => delRaid.fn({ id })}
+              onUpdateSettings={(patch) => updateSettings.fn({ projectId, patch }, "Settings saved")} />
+          )}
           {data && (view === "sheet" || view === "usage") && (() => {
             const rp = {
               plan: data,

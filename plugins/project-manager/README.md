@@ -41,6 +41,19 @@ Editing works the way it does in MS Project:
 
 Deleting a task removes it from the plan and cancels the Paperclip issue (the plugin SDK cannot hard-delete issues).
 
+## Iteration 2: the PM office
+
+| View | What a project manager gets |
+| --- | --- |
+| S-Curve & Budget | Earned value management: BAC, PV, EV, AC, SV, CV, SPI, CPI, EAC, ETC, VAC, TCPI, forecast finish and an automatic RAG status. The S-curve plots cumulative planned value against earned value and actual cost with weekly snapshots (recorded daily by the health job, every Monday by the status job, or on demand). Planned cost comes from resource rates × hours (override per task); actual cost = logged hours × rate + the AI agent spend Paperclip already tracks per issue. Budget, currency, status date, sponsor, PM and RAG override are editable. |
+| Communications › Dashboard | Health tiles, the **nudge center** (overdue / blocked / due soon / not started / unassigned tasks with their owner), upcoming milestones, top risks, recent nudges. **Nudge** posts a comment on the issue and wakes the agent (or emails the human); **Nudge all overdue** does it in bulk. |
+| Communications › Status reports | One click (or every Monday 08:00) generates the weekly status report: RAG, schedule and budget tables (EVM), accomplished this week, planned next week, milestones, attention items, RAID summary and decisions needed. Copy as Markdown or **Email report** to the recipients list. |
+| Communications › Stakeholders | Stakeholder register (role, organisation, email, Paperclip identity, power, interest, channel, frequency) and the power/interest grid. |
+| Communications › Comm plan | Communication plan matrix: what, audience, channel, frequency, owner, next due (overdue rows highlighted). |
+| Communications › RAID log | Risks, assumptions, issues, decisions, dependencies with probability × impact scoring, response, owner, status and due date. Agents can add entries with `pm_log_raid_item`. |
+
+Email: by default the plugin opens a pre-filled draft in your mail client (`mailto:`). To send automatically, open the plugin settings in Paperclip and set `emailProvider` to `resend`, add a Resend API key and a verified from-address; the weekly job then emails reports to the recipients list and nudges human owners directly.
+
 ## Agent tools
 
 | Tool | Purpose |
@@ -48,12 +61,16 @@ Deleting a task removes it from the plan and cancels the Paperclip issue (the pl
 | `pm_get_schedule` | Full schedule for the current project with critical-path flags and float. |
 | `pm_my_assignments` | Tasks scheduled for the calling agent, ordered by start date. |
 | `pm_report_progress` | Record % complete on a task. |
+| `pm_get_status` | RAG, SPI/CPI, forecast, overdue tasks and open RAID items for the project. |
+| `pm_log_raid_item` | Add a risk, assumption, issue, decision or dependency to the RAID log. |
+| `pm_log_hours` | Log actual hours on a task (feeds actual cost). |
 
 ## Automation
 
 - `issue.updated` — issue marked *done* → 100 %; *in progress* → at least 10 %.
 - `issue.created` — new issues in planned projects get a schedule row.
-- Job `daily-health` (06:00) — recomputes every plan, logs projects that are behind baseline, stores a portfolio snapshot.
+- Job `daily-health` (06:00) — recomputes every plan, records the earned-value snapshot, logs projects that are behind baseline, stores a portfolio snapshot.
+- Job `weekly-status` (Monday 08:00) — generates the weekly status report per project, emails it to the recipients list when email is configured, and nudges owners of overdue tasks when auto-nudge is on.
 
 ## Data
 

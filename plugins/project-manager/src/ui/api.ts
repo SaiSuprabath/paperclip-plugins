@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePluginAction, usePluginData } from "@paperclipai/plugin-sdk/ui";
-import type { PlanPayload, PortfolioRow } from "../shared/types.js";
+import type { CommsPayload, EvmPayload, PlanPayload, PortfolioRow } from "../shared/types.js";
 
 export interface ProjectRow {
   id: string;
@@ -18,6 +18,14 @@ export function useProjects(companyId: string | null) {
 
 export function usePlan(companyId: string | null, projectId: string | null) {
   return usePluginData<PlanPayload>("plan", { companyId: companyId ?? "", projectId: projectId ?? "" }) as unknown as DataResult<PlanPayload>;
+}
+
+export function useEvm(companyId: string | null, projectId: string | null, enabled: boolean) {
+  return usePluginData<EvmPayload | null>("evm", { companyId: companyId ?? "", projectId: enabled ? projectId ?? "" : "" }) as unknown as DataResult<EvmPayload | null>;
+}
+
+export function useComms(companyId: string | null, projectId: string | null, enabled: boolean) {
+  return usePluginData<CommsPayload | null>("comms", { companyId: companyId ?? "", projectId: enabled ? projectId ?? "" : "" }) as unknown as DataResult<CommsPayload | null>;
 }
 
 export function usePortfolio(companyId: string | null) {

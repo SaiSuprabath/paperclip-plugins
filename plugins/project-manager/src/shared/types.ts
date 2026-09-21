@@ -69,6 +69,9 @@ export interface PlanTask {
   outlineLevel: number;
   isSummary: boolean;
   collapsed: boolean;
+  plannedCostOverride: number | null;
+  actualCostManual: number | null;
+  actualHours: number | null;
   // Computed by the CPM engine
   start: string;
   finish: string;
@@ -109,7 +112,7 @@ export interface AgentRef {
 
 export interface PlanPayload {
   project: { id: string; name: string; status: string; targetDate: string | null; color: string | null };
-  plan: { startDate: string; statusDate: string | null; baselineSavedAt: string | null };
+  plan: PlanSettings;
   calendar: CalendarDef;
   tasks: PlanTask[];
   links: TaskLink[];
@@ -128,4 +131,94 @@ export interface PortfolioRow {
   status: string;
   color: string | null;
   summary: PlanSummary | null;
+}
+
+export interface PlanSettings {
+  startDate: string;
+  statusDate: string | null;
+  baselineSavedAt: string | null;
+  budgetAmount: number | null;
+  currency: string;
+  sponsor: string | null;
+  pmName: string | null;
+  pmEmail: string | null;
+  ragOverride: string | null;
+  autoNudge: boolean;
+  reportRecipients: string | null;
+}
+
+export type Rag = "green" | "amber" | "red";
+
+export interface EvmMetrics {
+  statusDate: string;
+  bac: number;
+  pv: number;
+  ev: number;
+  ac: number;
+  sv: number;
+  cv: number;
+  spi: number | null;
+  cpi: number | null;
+  eac: number;
+  etc: number;
+  vac: number;
+  tcpi: number | null;
+  pctComplete: number;
+  pctPlanned: number;
+  pctSpent: number;
+  forecastFinish: string;
+  plannedFinish: string;
+  rag: Rag;
+  ragReasons: string[];
+}
+
+export interface CurvePoint { date: string; pv: number; ev: number | null; ac: number | null; forecast?: boolean }
+
+export interface TaskCostRow {
+  issueId: string;
+  identifier: string | null;
+  title: string;
+  outlineLevel: number;
+  isSummary: boolean;
+  plannedCost: number;
+  plannedHours: number;
+  actualCost: number;
+  agentCost: number;
+  actualHours: number;
+  earnedValue: number;
+  percentComplete: number;
+  resources: string;
+  overridden: boolean;
+}
+
+export interface ResourceCostRow { resourceId: string; name: string; kind: ResourceKind; plannedHours: number; plannedCost: number; taskCount: number }
+
+export interface EvmPayload {
+  metrics: EvmMetrics;
+  curve: CurvePoint[];
+  snapshots: { date: string; pv: number; ev: number; ac: number; bac: number }[];
+  tasks: TaskCostRow[];
+  resources: ResourceCostRow[];
+  settings: PlanSettings;
+  currency: string;
+}
+
+export interface Stakeholder { id: string; name: string; role: string | null; organization: string | null; email: string | null; userId: string | null; agentId: string | null; power: string; interest: string; channel: string | null; frequency: string | null; notes: string | null }
+export interface CommItem { id: string; item: string; audience: string | null; channel: string | null; frequency: string | null; owner: string | null; nextDue: string | null; notes: string | null }
+export interface RaidItem { id: string; kind: string; title: string; description: string | null; probability: number | null; impact: number | null; score: number | null; response: string | null; owner: string | null; status: string; dueDate: string | null; issueId: string | null; createdBy: string | null; createdAt: string; closedAt: string | null }
+export interface StatusReport { id: string; periodStart: string; periodEnd: string; rag: Rag; contentMd: string; metrics: Partial<EvmMetrics>; sentTo: string[]; createdBy: string | null; createdAt: string }
+export interface NudgeLog { id: string; issueId: string | null; targetKind: string; targetName: string | null; channel: string; message: string | null; actor: string | null; createdAt: string }
+export interface AttentionItem { issueId: string; identifier: string | null; title: string; kind: "overdue" | "due_soon" | "stalled" | "unassigned" | "blocked"; finish: string; daysLate: number; ownerKind: "agent" | "human" | "none"; ownerId: string | null; ownerName: string | null; ownerEmail: string | null; critical: boolean; percentComplete: number; status: string }
+
+export interface CommsPayload {
+  stakeholders: Stakeholder[];
+  commPlan: CommItem[];
+  raid: RaidItem[];
+  reports: StatusReport[];
+  nudges: NudgeLog[];
+  attention: AttentionItem[];
+  email: { provider: "mailto" | "resend"; configured: boolean; from: string | null };
+  settings: PlanSettings;
+  metrics: EvmMetrics;
+  milestones: { issueId: string; identifier: string | null; title: string; date: string; done: boolean }[];
 }

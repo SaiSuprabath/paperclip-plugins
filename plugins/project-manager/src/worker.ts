@@ -2,6 +2,7 @@ import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 import type { PluginContext, Issue, Agent, ToolResult } from "@paperclipai/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { computeSchedule, levelResources, DEFAULT_CALENDAR, WorkCalendar, toIsoDate, type CpmTaskInput } from "./shared/cpm.js";
+import { registerPmOffice } from "./pm-office.js";
 import type {
   Assignment,
   CalendarDef,
@@ -67,7 +68,7 @@ const plugin = definePlugin({
     }
 
     async function ensurePlan(companyId: string, projectId: string, issues: Issue[]) {
-      const rows = await q(`SELECT project_id, company_id, start_date, status_date, baseline_saved_at, settings FROM ${T.plans} WHERE project_id = $1`, [projectId]);
+      const rows = await q(`SELECT * FROM ${T.plans} WHERE project_id = $1`, [projectId]);
       if (rows[0]) return rows[0];
       const earliest = issues
         .map((i) => dateStr(i.createdAt))
@@ -301,6 +302,9 @@ const plugin = definePlugin({
           outlineLevel: level,
           isSummary: summary,
           collapsed: bool(r.collapsed),
+          plannedCostOverride: r.planned_cost == null ? null : num(r.planned_cost),
+          actualCostManual: r.actual_cost_manual == null ? null : num(r.actual_cost_manual),
+          actualHours: r.actual_hours == null ? null : num(r.actual_hours),
           start, finish, lateStart, lateFinish, totalFloat, freeFloat, critical,
           predecessors: validLinks.filter((l) => l.successorIssueId === id).map((l) => ({ issueId: l.predecessorIssueId, type: l.type, lagDays: l.lagDays })),
           successors: validLinks.filter((l) => l.predecessorIssueId === id).map((l) => l.successorIssueId),
@@ -324,7 +328,19 @@ const plugin = definePlugin({
 
       return {
         project: { id: project.id, name: project.name, status: project.status, targetDate: project.targetDate, color: project.color },
-        plan: { startDate: planStart, statusDate: dateStr(planRow.status_date), baselineSavedAt: str(planRow.baseline_saved_at) },
+        plan: {
+          startDate: planStart,
+          statusDate: dateStr(planRow.status_date),
+          baselineSavedAt: str(planRow.baseline_saved_at),
+          budgetAmount: planRow.budget_amount == null ? null : num(planRow.budget_amount),
+          currency: str(planRow.currency) ?? "USD",
+          sponsor: str(planRow.sponsor),
+          pmName: str(planRow.pm_name),
+          pmEmail: str(planRow.pm_email),
+          ragOverride: str(planRow.rag_override),
+          autoNudge: bool(planRow.auto_nudge),
+          reportRecipients: str(planRow.report_recipients),
+        },
         calendar,
         tasks,
         links: validLinks,
@@ -890,6 +906,7 @@ const plugin = definePlugin({
           try {
             const plan = await buildPlan(c.id, p.id);
             rows.push({ projectId: p.id, name: p.name, status: p.status, color: p.color, summary: plan.summary });
+            await office.recordSnapshot(c.id, p.id).catch((err) => ctx.logger.warn("daily-health: snapshot failed", { projectId: p.id, error: String(err) }));
             if ((plan.summary.slippageDays ?? 0) > 0) {
               await ctx.activity
                 .log({ companyId: c.id, message: `Project Manager: "${p.name}" is ${plan.summary.slippageDays} day(s) behind baseline (finish ${plan.summary.projectFinish}).` } as never)
@@ -902,6 +919,9 @@ const plugin = definePlugin({
         await ctx.state.set({ scopeKind: "company", scopeId: c.id, stateKey: "portfolio-snapshot" }, { at: new Date().toISOString(), runId: job.runId, rows });
       }
     });
+
+    const office = registerPmOffice({ ctx, T, q, x, buildPlan, requireString });
+    void office;
 
     ctx.logger.info("Project Manager plugin ready", { namespace: ns });
   },
