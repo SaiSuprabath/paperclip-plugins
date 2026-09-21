@@ -537,8 +537,11 @@ const plugin = definePlugin({
 
     ctx.actions.register("upsert-resource", async (params) => {
       const companyId = requireString(params, "companyId");
-      const r = (params.resource ?? {}) as Partial<Resource>;
-      const id = r.id && String(r.id).length > 0 ? String(r.id) : randomUUID();
+      const patch = (params.resource ?? {}) as Partial<Resource>;
+      const id = patch.id && String(patch.id).length > 0 ? String(patch.id) : randomUUID();
+      // Merge with the stored row so partial updates never clear other fields (e.g. the agent link).
+      const existing = (await loadResources(companyId)).find((k) => k.id === id);
+      const r: Partial<Resource> = { ...(existing ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
       const kind = r.kind === "agent" ? "agent" : "human";
       const name = String(r.name ?? "").trim();
       if (!name) throw new Error("Resource name is required");
