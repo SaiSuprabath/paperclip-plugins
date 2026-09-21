@@ -171,6 +171,26 @@ export function Gantt(props: GanttProps) {
     return out;
   }, [range, px, zoom, cal]);
 
+  // ---- split panes (MS Project style): independent horizontal scroll, synced vertical scroll
+  const [leftWidth, setLeftWidth] = useState(() => { try { return Number(localStorage.getItem("pm-left-width")) || 620; } catch { return 620; } });
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const syncing = useRef(false);
+  const syncScroll = (from: HTMLDivElement | null, to: HTMLDivElement | null) => {
+    if (!from || !to || syncing.current) return;
+    syncing.current = true;
+    to.scrollTop = from.scrollTop;
+    requestAnimationFrame(() => { syncing.current = false; });
+  };
+  const onSplitDown = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX; const startW = leftWidth;
+    const move = (ev: PointerEvent) => setLeftWidth(Math.max(240, Math.min(1400, startW + ev.clientX - startX)));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); try { localStorage.setItem("pm-left-width", String(leftWidth)); } catch { /* ignore */ } };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  useEffect(() => { try { localStorage.setItem("pm-left-width", String(leftWidth)); } catch { /* ignore */ } }, [leftWidth]);
+
   // ---- editing state
   const [editing, setEditing] = useState<{ id: string; col: string } | null>(null);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -281,8 +301,9 @@ export function Gantt(props: GanttProps) {
   return (
     <div className="pm-gantt" tabIndex={0} onKeyDown={onKey} onContextMenu={(e) => { const row = (e.target as HTMLElement).closest("[data-issue]")?.getAttribute("data-issue"); if (row) { e.preventDefault(); onSelect(row); setMenu({ id: row, x: e.clientX, y: e.clientY }); } }}>
       {error && <div className="pm-toast pm-toast-err">{error}</div>}
-      <div className="pm-gantt-inner" style={{ gridTemplateColumns: `${LEFT_W}px ${width}px`, width: LEFT_W + width }}>
-        <div className="pm-gantt-left">
+      <div className="pm-gantt-split">
+        <div className="pm-gantt-left" ref={leftRef} style={{ width: leftWidth }} onScroll={() => syncScroll(leftRef.current, rightRef.current)}>
+         <div style={{ width: LEFT_W, minWidth: "100%" }}>
           <div className="pm-gantt-left-head" style={{ gridTemplateColumns: LEFT_COLS, height: HEAD_H }}>
             {COLS.map((c) => <div key={c.key}>{c.label}</div>)}
           </div>
@@ -309,9 +330,10 @@ export function Gantt(props: GanttProps) {
           <div className="pm-gantt-row pm-new-row" style={{ gridTemplateColumns: LEFT_COLS, height: ROW_H }} onClick={() => props.onInsert(visible.at(-1)?.issueId ?? null, "below", false)}>
             <div /><div className="pm-muted pm-mono pm-rownum">{all.length + 1}</div><div className="pm-muted" style={{ paddingLeft: 24 }}>Click to add a new task…</div>
           </div>
+         </div>
         </div>
-
-        <div className="pm-gantt-right">
+        <div className="pm-splitter" onPointerDown={onSplitDown} title="Drag to resize the task grid" />
+        <div className="pm-gantt-right" ref={rightRef} onScroll={() => syncScroll(rightRef.current, leftRef.current)}>
           <svg className="pm-gantt-head-svg" width={width} height={HEAD_H}>
             <rect x={0} y={0} width={width} height={HEAD_H} fill="var(--pm-head-bg)" />
             {months.map((m, i) => (<g key={i}><line x1={m.x} y1={0} x2={m.x} y2={HEAD_H} stroke="var(--border)" /><text x={m.x + 5} y={15} fontSize={11} fill="var(--foreground)" fontWeight={600}>{m.label}</text></g>))}

@@ -58,9 +58,12 @@
 .pm-toast.pm-toast-err { border-color: var(--destructive); }
 
 /* Gantt */
-.pm-gantt { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; background: var(--card); position: relative; }
-.pm-gantt-inner { position: relative; display: grid; }
-.pm-gantt-left { position: sticky; left: 0; z-index: 3; background: var(--card); border-right: 1px solid var(--border); }
+.pm-gantt { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--card); position: relative; display: flex; flex-direction: column; }
+.pm-gantt-split { display: flex; flex: 1; min-height: 0; }
+.pm-gantt-left { flex: none; overflow: auto; background: var(--card); min-height: 0; }
+.pm-splitter { flex: none; width: 5px; cursor: col-resize; background: var(--border); }
+.pm-splitter:hover { background: var(--ring); }
+.pm-gantt-right { flex: 1; min-width: 0; overflow: auto; min-height: 0; }
 .pm-gantt-left-head { position: sticky; top: 0; z-index: 4; background: var(--card); border-bottom: 1px solid var(--border); display: grid; align-items: center; font-size: 11.5px; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.03em; }
 .pm-gantt-left-head > div, .pm-gantt-row > div { padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-gantt-row { display: grid; align-items: center; border-bottom: 1px solid var(--border); cursor: pointer; }
@@ -72,9 +75,9 @@
 .pm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pm-bar); vertical-align: middle; }
 .pm-dot.pm-crit { background: var(--pm-critical); }
 .pm-dot.pm-ms { background: var(--pm-milestone); border-radius: 1px; transform: rotate(45deg); }
-.pm-gantt-right { position: relative; }
 .pm-gantt-right svg { display: block; }
-.pm-gantt-head-svg { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--border); }
+.pm-gantt-head-svg { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--border); display: block; }
+.pm-gantt-right svg { display: block; }
 .pm-bar { cursor: grab; }
 .pm-bar:active { cursor: grabbing; }
 .pm-bar-handle { cursor: ew-resize; }
