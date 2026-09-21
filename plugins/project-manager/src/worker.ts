@@ -1,7 +1,7 @@
 import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 import type { PluginContext, Issue, Agent, ToolResult } from "@paperclipai/plugin-sdk";
 import { randomUUID } from "node:crypto";
-import { computeSchedule, levelResources, DEFAULT_CALENDAR, toIsoDate, type CpmTaskInput } from "./shared/cpm.js";
+import { computeSchedule, levelResources, DEFAULT_CALENDAR, WorkCalendar, toIsoDate, type CpmTaskInput } from "./shared/cpm.js";
 import type {
   Assignment,
   CalendarDef,
@@ -108,6 +108,10 @@ const plugin = definePlugin({
         costPerHour: r.cost_per_hour == null ? null : num(r.cost_per_hour),
         color: str(r.color),
         active: r.active === undefined ? true : bool(r.active),
+        initials: str(r.initials),
+        groupName: str(r.group_name),
+        maxUnitsPct: num(r.max_units_pct, 100),
+        overtimeRate: r.overtime_rate == null ? null : num(r.overtime_rate),
       }));
     }
 
@@ -179,15 +183,67 @@ const plugin = definePlugin({
       const assignments = await loadAssignments(companyId, ids);
       const validLinks = links.filter((l) => ids.has(l.predecessorIssueId) && ids.has(l.successorIssueId));
       const planStart = dateStr(planRow.start_date) ?? todayIso();
+      const cal = new WorkCalendar(planStart, calendar);
 
-      const inputs: CpmTaskInput[] = rows.map((r) => {
+      // ---- Outline (summary tasks). Plugin-side parent wins; falls back to the Paperclip parent issue.
+      const rowById = new Map(rows.map((r) => [String(r.issue_id), r]));
+      const parentOf = new Map<string, string | null>();
+      for (const r of rows) {
         const id = String(r.issue_id);
+        const explicit = str(r.parent_issue_id) || null;
+        const fallback = issueById.get(id)?.parentId ?? null;
+        let parent = explicit && ids.has(explicit) ? explicit : fallback && ids.has(fallback) && !explicit ? fallback : null;
+        if (parent === id) parent = null;
+        parentOf.set(id, parent);
+      }
+      // break accidental cycles
+      for (const id of ids) {
+        const seen = new Set<string>();
+        let cur: string | null = id;
+        while (cur) {
+          if (seen.has(cur)) { parentOf.set(id, null); break; }
+          seen.add(cur);
+          cur = parentOf.get(cur) ?? null;
+        }
+      }
+      const childrenOf = new Map<string, string[]>();
+      for (const [id, p] of parentOf) {
+        const key = p ?? "";
+        if (!childrenOf.has(key)) childrenOf.set(key, []);
+        childrenOf.get(key)!.push(id);
+      }
+      const bySort = (a: string, b: string) => num(rowById.get(a)!.sort_order) - num(rowById.get(b)!.sort_order);
+      const ordered: { id: string; level: number }[] = [];
+      const walk = (parent: string, level: number) => {
+        for (const id of (childrenOf.get(parent) ?? []).sort(bySort)) {
+          ordered.push({ id, level });
+          walk(id, level + 1);
+        }
+      };
+      walk("", 0);
+      const isSummary = (id: string) => (childrenOf.get(id)?.length ?? 0) > 0;
+      const leavesUnder = (id: string): string[] => (isSummary(id) ? (childrenOf.get(id) ?? []).flatMap(leavesUnder) : [id]);
+
+      // ---- Expand links touching summary tasks to their leaf tasks.
+      const leafPreds = new Map<string, { id: string; type: LinkType; lag: number }[]>();
+      for (const l of validLinks) {
+        const preds = leavesUnder(l.predecessorIssueId);
+        const succs = leavesUnder(l.successorIssueId);
+        for (const sId of succs) {
+          if (!leafPreds.has(sId)) leafPreds.set(sId, []);
+          for (const pId of preds) if (pId !== sId) leafPreds.get(sId)!.push({ id: pId, type: l.type, lag: l.lagDays });
+        }
+      }
+
+      const leafIds = ordered.filter((o) => !isSummary(o.id)).map((o) => o.id);
+      const inputs: CpmTaskInput[] = leafIds.map((id) => {
+        const r = rowById.get(id)!;
         const issue = issueById.get(id)!;
         const cancelled = issue.status === "cancelled";
         return {
           id,
           duration: bool(r.is_milestone) ? 0 : cancelled ? 0 : Math.max(0, num(r.duration_days, 1)),
-          predecessors: validLinks.filter((l) => l.successorIssueId === id).map((l) => ({ id: l.predecessorIssueId, type: l.type, lag: l.lagDays })),
+          predecessors: leafPreds.get(id) ?? [],
           constraintType: (str(r.constraint_type) as ConstraintType) ?? "asap",
           constraintDate: dateStr(r.start_date),
           levelingDelay: num(r.leveling_delay_days, 0),
@@ -196,10 +252,31 @@ const plugin = definePlugin({
       const cpm = computeSchedule(inputs, planStart, calendar);
       const today = todayIso();
 
-      const tasks: PlanTask[] = rows.map((r) => {
-        const id = String(r.issue_id);
+      const tasks: PlanTask[] = ordered.map(({ id, level }) => {
+        const r = rowById.get(id)!;
         const issue = issueById.get(id)!;
-        const c = cpm.tasks.get(id)!;
+        const summary = isSummary(id);
+        let start: string, finish: string, lateStart: string, lateFinish: string, totalFloat: number, freeFloat: number, critical: boolean, durationDays: number, pct: number;
+        if (summary) {
+          const leaves = leavesUnder(id).map((lid) => ({ c: cpm.tasks.get(lid)!, r: rowById.get(lid)!, i: issueById.get(lid)! })).filter((x) => x.c);
+          start = leaves.map((x) => x.c.start).sort()[0] ?? planStart;
+          finish = leaves.map((x) => x.c.finish).sort().at(-1) ?? start;
+          lateStart = leaves.map((x) => x.c.lateStart).sort()[0] ?? start;
+          lateFinish = leaves.map((x) => x.c.lateFinish).sort().at(-1) ?? finish;
+          totalFloat = Math.min(...leaves.map((x) => x.c.totalFloat), Number.MAX_SAFE_INTEGER);
+          if (totalFloat === Number.MAX_SAFE_INTEGER) totalFloat = 0;
+          freeFloat = totalFloat;
+          critical = leaves.some((x) => x.c.critical && x.i.status !== "cancelled");
+          durationDays = Math.max(0, cal.workingDaysBetween(start, finish) + 1);
+          const totalDur = leaves.reduce((a, x) => a + Math.max(1, num(x.r.duration_days, 1)), 0);
+          pct = totalDur ? Math.round(leaves.reduce((a, x) => a + Math.max(1, num(x.r.duration_days, 1)) * (x.i.status === "done" ? 100 : num(x.r.percent_complete, 0)), 0) / totalDur) : 0;
+        } else {
+          const c = cpm.tasks.get(id)!;
+          start = c.start; finish = c.finish; lateStart = c.lateStart; lateFinish = c.lateFinish;
+          totalFloat = c.totalFloat; freeFloat = c.freeFloat; critical = c.critical && issue.status !== "cancelled";
+          durationDays = num(r.duration_days, 1);
+          pct = issue.status === "done" ? 100 : num(r.percent_complete, 0);
+        }
         return {
           issueId: id,
           identifier: issue.identifier ?? null,
@@ -208,31 +285,28 @@ const plugin = definePlugin({
           priority: issue.priority,
           assigneeAgentId: issue.assigneeAgentId ?? null,
           assigneeUserId: issue.assigneeUserId ?? null,
-          durationDays: num(r.duration_days, 1),
+          durationDays,
           effortHours: r.effort_hours == null ? null : num(r.effort_hours),
           startDate: dateStr(r.start_date),
           constraintType: (str(r.constraint_type) as ConstraintType) ?? "asap",
-          percentComplete: issue.status === "done" ? 100 : num(r.percent_complete, 0),
-          isMilestone: bool(r.is_milestone),
+          percentComplete: pct,
+          isMilestone: bool(r.is_milestone) && !summary,
           sortOrder: num(r.sort_order, 0),
           levelingDelayDays: num(r.leveling_delay_days, 0),
           notes: str(r.notes),
           baselineStart: dateStr(r.baseline_start),
           baselineFinish: dateStr(r.baseline_finish),
-          start: c.start,
-          finish: c.finish,
-          lateStart: c.lateStart,
-          lateFinish: c.lateFinish,
-          totalFloat: c.totalFloat,
-          freeFloat: c.freeFloat,
-          critical: c.critical && issue.status !== "cancelled",
-          predecessors: inputs.find((i) => i.id === id)!.predecessors.map((p) => ({ issueId: p.id, type: p.type, lagDays: p.lag })),
+          parentIssueId: parentOf.get(id) ?? null,
+          outlineLevel: level,
+          isSummary: summary,
+          collapsed: bool(r.collapsed),
+          start, finish, lateStart, lateFinish, totalFloat, freeFloat, critical,
+          predecessors: validLinks.filter((l) => l.successorIssueId === id).map((l) => ({ issueId: l.predecessorIssueId, type: l.type, lagDays: l.lagDays })),
           successors: validLinks.filter((l) => l.predecessorIssueId === id).map((l) => l.successorIssueId),
         };
       });
-      tasks.sort((a, b) => a.sortOrder - b.sortOrder || a.start.localeCompare(b.start));
 
-      const live = tasks.filter((t) => t.status !== "cancelled");
+      const live = tasks.filter((t) => t.status !== "cancelled" && !t.isSummary);
       const baselineFinish = live.map((t) => t.baselineFinish).filter((d): d is string => !!d).sort().at(-1) ?? null;
       const summary: PlanSummary = {
         projectStart: planStart,
@@ -336,6 +410,22 @@ const plugin = definePlugin({
       if ("sortOrder" in patch) set("sort_order", Math.round(num(patch.sortOrder, 0)));
       if ("notes" in patch) set("notes", patch.notes == null ? null : String(patch.notes));
       if ("levelingDelayDays" in patch) set("leveling_delay_days", Math.max(0, Math.round(num(patch.levelingDelayDays, 0))));
+      if ("collapsed" in patch) set("collapsed", Boolean(patch.collapsed));
+      if ("parentIssueId" in patch) {
+        const parent = patch.parentIssueId ? String(patch.parentIssueId) : null;
+        if (parent) {
+          if (parent === issueId) throw new Error("A task cannot be its own summary task");
+          // reject cycles: walk up from the proposed parent
+          let cur: string | null = parent;
+          let guard = 0;
+          while (cur && guard++ < 100) {
+            if (cur === issueId) throw new Error("Cannot indent a task under one of its own subtasks");
+            const rows: Row[] = await q(`SELECT parent_issue_id FROM ${T.tasks} WHERE issue_id = $1`, [cur]);
+            cur = rows[0] ? str(rows[0].parent_issue_id) || null : null;
+          }
+        }
+        set("parent_issue_id", parent ?? "");
+      }
       if (fields.length === 0) return { ok: true, unchanged: true };
       set("updated_at", new Date().toISOString());
       values.push(issueId, companyId);
@@ -435,9 +525,10 @@ const plugin = definePlugin({
       const kind = r.kind === "agent" ? "agent" : "human";
       const name = String(r.name ?? "").trim();
       if (!name) throw new Error("Resource name is required");
+      const initials = r.initials ?? name.split(/\s+/).map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 3);
       await x(
-        `INSERT INTO ${T.resources} (id, company_id, kind, name, email, agent_id, user_id, role, capacity_hours_per_day, cost_per_hour, color, active, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now()) ON CONFLICT (id) DO UPDATE SET kind = $3, name = $4, email = $5, agent_id = $6, user_id = $7, role = $8, capacity_hours_per_day = $9, cost_per_hour = $10, color = $11, active = $12, updated_at = now()`,
-        [id, companyId, kind, name, r.email ?? null, r.agentId ?? null, r.userId ?? null, r.role ?? null, num(r.capacityHoursPerDay, kind === "agent" ? 8 : 8), r.costPerHour == null ? null : num(r.costPerHour), r.color ?? null, r.active === undefined ? true : Boolean(r.active)],
+        `INSERT INTO ${T.resources} (id, company_id, kind, name, email, agent_id, user_id, role, capacity_hours_per_day, cost_per_hour, color, active, initials, group_name, max_units_pct, overtime_rate, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now()) ON CONFLICT (id) DO UPDATE SET kind = $3, name = $4, email = $5, agent_id = $6, user_id = $7, role = $8, capacity_hours_per_day = $9, cost_per_hour = $10, color = $11, active = $12, initials = $13, group_name = $14, max_units_pct = $15, overtime_rate = $16, updated_at = now()`,
+        [id, companyId, kind, name, r.email ?? null, r.agentId ?? null, r.userId ?? null, r.role ?? null, num(r.capacityHoursPerDay, 8), r.costPerHour == null ? null : num(r.costPerHour), r.color ?? null, r.active === undefined ? true : Boolean(r.active), initials, r.groupName ?? null, Math.max(0, Math.round(num(r.maxUnitsPct, 100))), r.overtimeRate == null ? null : num(r.overtimeRate)],
       );
       return { ok: true, id };
     });
@@ -458,8 +549,8 @@ const plugin = definePlugin({
       for (const a of agents as Agent[]) {
         if (a.status === "terminated" || known.has(a.id)) continue;
         await x(
-          `INSERT INTO ${T.resources} (id, company_id, kind, name, agent_id, role, capacity_hours_per_day, active) VALUES ($1, $2, 'agent', $3, $4, $5, $6, true)`,
-          [randomUUID(), companyId, a.name, a.id, a.title ?? a.role, 8],
+          `INSERT INTO ${T.resources} (id, company_id, kind, name, agent_id, role, capacity_hours_per_day, active, initials, group_name) VALUES ($1, $2, 'agent', $3, $4, $5, $6, true, $7, 'Agents')`,
+          [randomUUID(), companyId, a.name, a.id, a.title ?? a.role, 8, a.name.split(/\s+/).map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 3)],
         );
         created++;
       }
@@ -585,6 +676,118 @@ const plugin = definePlugin({
       await x(`DELETE FROM ${T.assignments} WHERE company_id = $1 AND issue_id = $2`, [companyId, issueId]);
       await x(`DELETE FROM ${T.tasks} WHERE company_id = $1 AND issue_id = $2`, [companyId, issueId]);
       if (params.cancelIssue === true) await ctx.issues.update(issueId, { status: "cancelled" }, companyId);
+      return { ok: true };
+    });
+
+    /** Replace all predecessors of a task (MS Project "Predecessors" cell semantics). */
+    ctx.actions.register("set-predecessors", async (params) => {
+      const companyId = requireString(params, "companyId");
+      const projectId = requireString(params, "projectId");
+      const issueId = requireString(params, "issueId");
+      const preds = (Array.isArray(params.predecessors) ? params.predecessors : []) as { predecessorIssueId: string; type?: string; lagDays?: number }[];
+      await x(`DELETE FROM ${T.links} WHERE company_id = $1 AND successor_issue_id = $2`, [companyId, issueId]);
+      for (const p of preds) {
+        if (!p.predecessorIssueId || p.predecessorIssueId === issueId) continue;
+        const type = ["FS", "SS", "FF", "SF"].includes(String(p.type)) ? String(p.type) : "FS";
+        await x(
+          `INSERT INTO ${T.links} (id, company_id, project_id, predecessor_issue_id, successor_issue_id, link_type, lag_days) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (predecessor_issue_id, successor_issue_id) DO UPDATE SET link_type = $6, lag_days = $7`,
+          [randomUUID(), companyId, projectId, p.predecessorIssueId, issueId, type, Math.round(num(p.lagDays, 0))],
+        );
+      }
+      await mirrorBlockers(companyId, issueId, projectId);
+      return { ok: true, count: preds.length };
+    });
+
+    /** Assign by typing names (MS Project "Resource Names" cell): unknown names become new human resources. */
+    ctx.actions.register("assign-by-names", async (params) => {
+      const companyId = requireString(params, "companyId");
+      const issueId = requireString(params, "issueId");
+      const names = (Array.isArray(params.names) ? params.names : String(params.names ?? "").split(/[,;]/)).map((n) => String(n).trim()).filter(Boolean);
+      const [resources, agents] = await Promise.all([loadResources(companyId), ctx.agents.list({ companyId, limit: 200 })]);
+      const ids: string[] = [];
+      let created = 0;
+      for (const raw of names) {
+        const m = raw.match(/^(.*?)(?:\s*\[(\d+)%\])?$/);
+        const name = (m?.[1] ?? raw).trim();
+        const lower = name.toLowerCase();
+        let res = resources.find((r) => r.name.toLowerCase() === lower || (r.initials ?? "").toLowerCase() === lower);
+        if (!res) {
+          const agent = (agents as Agent[]).find((a) => a.name.toLowerCase() === lower && a.status !== "terminated");
+          const id = randomUUID();
+          const initials = name.split(/\s+/).map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 3);
+          await x(
+            `INSERT INTO ${T.resources} (id, company_id, kind, name, agent_id, role, capacity_hours_per_day, active, initials, group_name) VALUES ($1, $2, $3, $4, $5, $6, 8, true, $7, $8)`,
+            [id, companyId, agent ? "agent" : "human", agent?.name ?? name, agent?.id ?? null, agent?.title ?? agent?.role ?? null, initials, agent ? "Agents" : null],
+          );
+          created++;
+          res = { id, kind: agent ? "agent" : "human", agentId: agent?.id ?? null, userId: null } as Resource;
+          resources.push(res as Resource);
+        }
+        if (!ids.includes(res.id)) ids.push(res.id);
+      }
+      await x(`DELETE FROM ${T.assignments} WHERE company_id = $1 AND issue_id = $2`, [companyId, issueId]);
+      let i = 0;
+      for (const rid of ids) {
+        const unitsMatch = names[i++]?.match(/\[(\d+)%\]/);
+        await x(`INSERT INTO ${T.assignments} (id, company_id, issue_id, resource_id, units_pct) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (issue_id, resource_id) DO UPDATE SET units_pct = $5`, [randomUUID(), companyId, issueId, rid, unitsMatch ? Math.max(1, Number(unitsMatch[1])) : 100]);
+      }
+      const primary = resources.find((r) => r.id === ids[0]);
+      if (primary?.kind === "agent" && primary.agentId) await ctx.issues.update(issueId, { assigneeAgentId: primary.agentId, assigneeUserId: null }, companyId);
+      else if (primary?.kind === "human" && primary.userId) await ctx.issues.update(issueId, { assigneeAgentId: null, assigneeUserId: primary.userId }, companyId);
+      else if (ids.length === 0) await ctx.issues.update(issueId, { assigneeAgentId: null, assigneeUserId: null }, companyId);
+      return { ok: true, resourceIds: ids, created };
+    });
+
+    /** Insert a new task at a position in the outline (MS Project Insert Task). */
+    ctx.actions.register("insert-task", async (params, actionCtx) => {
+      const companyId = requireString(params, "companyId");
+      const projectId = requireString(params, "projectId");
+      const title = (typeof params.title === "string" && params.title.trim()) || "New task";
+      const anchor = typeof params.anchorIssueId === "string" ? params.anchorIssueId : null;
+      const position = params.position === "above" ? "above" : "below";
+      const anchorRow = anchor ? (await q(`SELECT parent_issue_id, sort_order FROM ${T.tasks} WHERE issue_id = $1`, [anchor]))[0] : null;
+      const parentIssueId = typeof params.parentIssueId === "string" ? params.parentIssueId || null : anchorRow ? str(anchorRow.parent_issue_id) || null : null;
+      const issue = await ctx.issues.create({
+        companyId,
+        projectId,
+        parentId: parentIssueId ?? undefined,
+        title,
+        status: "todo",
+        priority: "medium",
+        originKind: "plugin:suprabath.project-manager:task",
+        originId: projectId,
+        actor: actionCtx.actor.userId || actionCtx.actor.agentId ? { actorUserId: actionCtx.actor.userId, actorAgentId: actionCtx.actor.agentId, actorRunId: actionCtx.actor.runId } : undefined,
+      } as never);
+      const isMilestone = Boolean(params.isMilestone);
+      const duration = isMilestone ? 0 : Math.max(0, num(params.durationDays, 1));
+      // Renumber: insert right after/before the anchor in global sort order.
+      const rows = await q<{ issue_id: string; sort_order: number }>(`SELECT issue_id, sort_order FROM ${T.tasks} WHERE project_id = $1 ORDER BY sort_order, created_at`, [projectId]);
+      const order = rows.map((r) => r.issue_id);
+      let idx = anchor ? order.indexOf(anchor) : order.length - 1;
+      if (idx < 0) idx = order.length - 1;
+      order.splice(position === "above" ? idx : idx + 1, 0, issue.id);
+      await x(
+        `INSERT INTO ${T.tasks} (issue_id, company_id, project_id, duration_days, is_milestone, constraint_type, sort_order, parent_issue_id) VALUES ($1, $2, $3, $4, $5, 'asap', $6, $7) ON CONFLICT (issue_id) DO NOTHING`,
+        [issue.id, companyId, projectId, duration, isMilestone, order.indexOf(issue.id), parentIssueId ?? ""],
+      );
+      let i = 0;
+      for (const id of order) await x(`UPDATE ${T.tasks} SET sort_order = $1 WHERE issue_id = $2 AND company_id = $3`, [i++, id, companyId]);
+      return { ok: true, issueId: issue.id, identifier: issue.identifier };
+    });
+
+    /** Delete a task from the plan (MS Project Delete Task). Paperclip issues cannot be deleted through the plugin SDK, so the issue is cancelled. */
+    ctx.actions.register("delete-task", async (params) => {
+      const companyId = requireString(params, "companyId");
+      const issueId = requireString(params, "issueId");
+      const row = (await q(`SELECT parent_issue_id FROM ${T.tasks} WHERE issue_id = $1 AND company_id = $2`, [issueId, companyId]))[0];
+      if (!row) throw new Error("Task not found in plan");
+      // Children move up one level.
+      await x(`UPDATE ${T.tasks} SET parent_issue_id = $1 WHERE parent_issue_id = $2 AND company_id = $3`, [str(row.parent_issue_id) ?? "", issueId, companyId]);
+      await x(`DELETE FROM ${T.links} WHERE company_id = $1 AND predecessor_issue_id = $2`, [companyId, issueId]);
+      await x(`DELETE FROM ${T.links} WHERE company_id = $1 AND successor_issue_id = $2`, [companyId, issueId]);
+      await x(`DELETE FROM ${T.assignments} WHERE company_id = $1 AND issue_id = $2`, [companyId, issueId]);
+      await x(`DELETE FROM ${T.tasks} WHERE company_id = $1 AND issue_id = $2`, [companyId, issueId]);
+      if (params.cancelIssue !== false) await ctx.issues.update(issueId, { status: "cancelled" }, companyId).catch((err) => ctx.logger.warn("cancel failed", { issueId, error: String(err) }));
       return { ok: true };
     });
 

@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHostLocation, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
 import type { LinkType, Resource } from "../shared/types.js";
 import { useAction, usePlan, useProjects, useToasts } from "./api.js";
-import { Gantt, type Zoom } from "./Gantt.js";
+import { Gantt, type Zoom, type PredecessorSpec } from "./Gantt.js";
 import { TaskEditor } from "./TaskEditor.js";
-import { ResourcesView } from "./Resources.js";
+import { ResourceSheet, ResourceUsage } from "./Resources.js";
 import { CriticalPathView } from "./CriticalPath.js";
 import { fmtDate, fmtDateFull } from "./util.js";
 
-type View = "gantt" | "critical" | "resources";
+type View = "gantt" | "critical" | "sheet" | "usage";
 
 export interface PlannerAppProps {
   companyId: string | null;
@@ -37,6 +37,7 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
   const [showBaseline, setShowBaseline] = useState(true);
   const [showLinks, setShowLinks] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDuration, setNewDuration] = useState("3");
@@ -59,7 +60,11 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
   const importAgents = useAction("import-agents", companyId, refresh, push);
   const updateCalendar = useAction("update-calendar", companyId, refresh, push);
   const updatePlan = useAction("update-plan", companyId, refresh, push);
-  const busy = [updateTask, setLink, removeLink, assign, createTask, removeTask, reorder, saveBaseline, clearBaseline, level, clearLeveling, upsertResource, deleteResource, importAgents, updateCalendar, updatePlan].some((a) => a.busy);
+  const setPredecessors = useAction("set-predecessors", companyId, refresh, push);
+  const assignByNames = useAction("assign-by-names", companyId, refresh, push);
+  const insertTask = useAction("insert-task", companyId, refresh, push);
+  const deleteTask = useAction("delete-task", companyId, refresh, push);
+  const busy = [updateTask, setLink, removeLink, assign, createTask, removeTask, reorder, saveBaseline, clearBaseline, level, clearLeveling, upsertResource, deleteResource, importAgents, updateCalendar, updatePlan, setPredecessors, assignByNames, insertTask, deleteTask].some((a) => a.busy);
 
   const data = plan.data;
   const selected = data?.tasks.find((t) => t.issueId === selectedId) ?? null;
@@ -85,6 +90,26 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
     await reorder.fn({ issueIds: ids });
   };
 
+  const indent = async (id: string) => {
+    if (!data) return;
+    const i = data.tasks.findIndex((t) => t.issueId === id);
+    const t = data.tasks[i];
+    if (!t || i === 0) return;
+    // New parent = nearest task above at the same outline level (MS Project semantics).
+    for (let j = i - 1; j >= 0; j--) {
+      const c = data.tasks[j]!;
+      if (c.outlineLevel === t.outlineLevel) { await updateTask.fn({ issueId: id, patch: { parentIssueId: c.issueId } }); return; }
+      if (c.outlineLevel < t.outlineLevel) break;
+    }
+    push("Nothing above this task to indent under", "err");
+  };
+  const outdent = async (id: string) => {
+    if (!data) return;
+    const t = data.tasks.find((k) => k.issueId === id);
+    if (!t?.parentIssueId) return;
+    const parent = data.tasks.find((k) => k.issueId === t.parentIssueId);
+    await updateTask.fn({ issueId: id, patch: { parentIssueId: parent?.parentIssueId ?? null } });
+  };
   const s = data?.summary;
 
   return (
@@ -103,9 +128,10 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
           </select>
         )}
         <div className="pm-seg">
-          <button className={view === "gantt" ? "pm-active" : ""} onClick={() => setView("gantt")}>Gantt</button>
-          <button className={view === "critical" ? "pm-active" : ""} onClick={() => setView("critical")}>Critical path</button>
-          <button className={view === "resources" ? "pm-active" : ""} onClick={() => setView("resources")}>Resources</button>
+          <button className={view === "gantt" ? "pm-active" : ""} onClick={() => setView("gantt")}>Gantt Chart</button>
+          <button className={view === "critical" ? "pm-active" : ""} onClick={() => setView("critical")}>Critical Path</button>
+          <button className={view === "sheet" ? "pm-active" : ""} onClick={() => setView("sheet")}>Resource Sheet</button>
+          <button className={view === "usage" ? "pm-active" : ""} onClick={() => setView("usage")}>Resource Usage</button>
         </div>
         {view === "gantt" && (
           <>
@@ -121,6 +147,7 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
         )}
         <span className="pm-spacer" />
         <button className="pm-btn pm-primary" disabled={!projectId} onClick={() => setAdding((v) => !v)}>+ Task</button>
+        <button className="pm-btn" disabled={!selectedId} onClick={() => selectedId && setInfoOpen(true)} title="Task information (Enter)">Task info</button>
         <button className="pm-btn" disabled={!projectId || busy} onClick={() => saveBaseline.fn({ projectId }, "Baseline saved")} title="Snapshot current dates as the baseline">Save baseline</button>
         {data?.plan.baselineSavedAt && <button className="pm-btn" disabled={busy} onClick={() => { if (confirm("Clear the saved baseline?")) void clearBaseline.fn({ projectId }, "Baseline cleared"); }}>Clear baseline</button>}
         <button className="pm-btn" disabled={!projectId || busy} onClick={async () => { const r = (await level.fn({ projectId })) as { delayedTasks: number }; push(`Leveled: ${r.delayedTasks} task(s) delayed to fit capacity`); }} title="Delay tasks so no resource exceeds its daily capacity">Level resources</button>
@@ -181,20 +208,33 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
               onMove={(id, start) => { const t = data.tasks.find((k) => k.issueId === id); void updateTask.fn({ issueId: id, patch: { startDate: start, constraintType: t && t.constraintType === "mso" ? "mso" : "snet" } }); }}
               onResize={(id, dur) => void updateTask.fn({ issueId: id, patch: { durationDays: dur } })}
               onLink={(pred, succ) => void setLink.fn({ projectId, predecessorIssueId: pred, successorIssueId: succ, type: "FS", lagDays: 0 }, "Dependency added")}
+              onEditLink={(link, patch) => patch ? void setLink.fn({ projectId, predecessorIssueId: link.predecessorIssueId, successorIssueId: link.successorIssueId, type: patch.type, lagDays: patch.lagDays }, "Dependency updated") : void removeLink.fn({ projectId, predecessorIssueId: link.predecessorIssueId, successorIssueId: link.successorIssueId }, "Dependency removed")}
+              onRename={(id, title) => void updateTask.fn({ issueId: id, patch: { title } })}
+              onSetDuration={(id, days) => void updateTask.fn({ issueId: id, patch: { durationDays: days } })}
+              onSetPredecessors={(id, preds: PredecessorSpec[]) => void setPredecessors.fn({ projectId, issueId: id, predecessors: preds })}
+              onAssignNames={(id, names) => void assignByNames.fn({ issueId: id, names })}
+              onSetPercent={(id, pct) => void updateTask.fn({ issueId: id, patch: { percentComplete: pct } })}
+              onToggleCollapse={(id, collapsed) => void updateTask.fn({ issueId: id, patch: { collapsed } })}
+              onInsert={async (anchor, position, isMilestone) => { const r = (await insertTask.fn({ projectId, anchorIssueId: anchor, position, isMilestone, title: isMilestone ? "New milestone" : "New task", durationDays: 1 })) as { issueId: string }; setSelectedId(r.issueId); }}
+              onDelete={(id) => { void deleteTask.fn({ issueId: id, cancelIssue: true }, "Task deleted"); if (selectedId === id) setSelectedId(null); }}
+              onIndent={indent}
+              onOutdent={outdent}
+              onSetMilestone={(id, m) => void updateTask.fn({ issueId: id, patch: m ? { isMilestone: true, durationDays: 0 } : { isMilestone: false, durationDays: 1 } })}
+              onOpenInfo={(id) => { setSelectedId(id); setInfoOpen(true); }}
             />
           )}
           {data && view === "critical" && <CriticalPathView plan={data} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); }} />}
-          {data && view === "resources" && (
-            <ResourcesView
-              plan={data}
-              busy={busy}
-              onUpsert={(r: Partial<Resource>) => upsertResource.fn({ resource: r }, "Resource saved")}
-              onDelete={(id) => deleteResource.fn({ resourceId: id }, "Resource deleted")}
-              onImportAgents={async () => { const r = (await importAgents.fn({})) as { created: number }; push(`Imported ${r.created} agent(s)`); }}
-              onUpdateCalendar={(cal) => updateCalendar.fn({ calendar: cal }, "Calendar updated")}
-              onSelectTask={(id) => { setSelectedId(id); setView("gantt"); }}
-            />
-          )}
+          {data && (view === "sheet" || view === "usage") && (() => {
+            const rp = {
+              plan: data,
+              busy,
+              onUpsert: (r: Partial<Resource>) => upsertResource.fn({ resource: r }, "Resource saved"),
+              onDelete: (id: string) => deleteResource.fn({ resourceId: id }, "Resource deleted"),
+              onImportAgents: async () => { const r = (await importAgents.fn({})) as { created: number }; push(`Imported ${r.created} agent(s)`); },
+              onUpdateCalendar: (cal: typeof data.calendar) => updateCalendar.fn({ calendar: cal }, "Calendar updated"),
+            };
+            return view === "sheet" ? <ResourceSheet {...rp} /> : <ResourceUsage {...rp} />;
+          })()}
           {data && view === "gantt" && data.tasks.length > 0 && (
             <div className="pm-legend" style={{ marginTop: 8 }}>
               <span><i style={{ background: "var(--pm-bar)" }} />task</span>
@@ -203,17 +243,17 @@ export function PlannerApp({ companyId, companyPrefix, initialProjectId, embedde
               <span><i style={{ background: "var(--pm-milestone)" }} />milestone</span>
               <span><i style={{ background: "var(--pm-baseline)" }} />baseline</span>
               <span><i style={{ background: "var(--pm-today)" }} />today</span>
-              <span className="pm-muted">Drag bars to move, drag the right edge to resize, drag the ○ handle onto another task to add a dependency.</span>
+              <span className="pm-muted">Click a cell to edit · right-click a row for insert / indent / delete · drag bars to move, right edge to resize, ○ handle to link · click an arrow to change FS/SS/FF/SF and lag · Enter opens Task Information.</span>
             </div>
           )}
         </div>
-        {selected && data && (
+        {selected && data && infoOpen && (
           <TaskEditor
             plan={data}
             task={selected}
             busy={busy}
             issueHref={issueHref(selected.identifier)}
-            onClose={() => setSelectedId(null)}
+            onClose={() => setInfoOpen(false)}
             onUpdate={(patch) => updateTask.fn({ issueId: selected.issueId, patch })}
             onSetLink={(pred: string, type: LinkType, lag: number) => setLink.fn({ projectId, predecessorIssueId: pred, successorIssueId: selected.issueId, type, lagDays: lag }, "Dependency added")}
             onRemoveLink={(pred) => removeLink.fn({ projectId, predecessorIssueId: pred, successorIssueId: selected.issueId }, "Dependency removed")}

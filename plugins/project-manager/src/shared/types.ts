@@ -32,6 +32,10 @@ export interface Resource {
   costPerHour: number | null;
   color: string | null;
   active: boolean;
+  initials: string | null;
+  groupName: string | null;
+  maxUnitsPct: number;
+  overtimeRate: number | null;
 }
 
 export interface Assignment {
@@ -60,6 +64,11 @@ export interface PlanTask {
   notes: string | null;
   baselineStart: string | null;
   baselineFinish: string | null;
+  /** Effective parent in the outline (plugin-side parent, falling back to the Paperclip parent issue). */
+  parentIssueId: string | null;
+  outlineLevel: number;
+  isSummary: boolean;
+  collapsed: boolean;
   // Computed by the CPM engine
   start: string;
   finish: string;

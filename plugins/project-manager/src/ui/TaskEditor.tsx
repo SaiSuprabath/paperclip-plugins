@@ -62,7 +62,7 @@ export function TaskEditor(p: TaskEditorProps) {
               </>
             )}
           </div>
-          <h3>{task.title}</h3>
+          <input className="pm-input" style={{ width: "100%", fontWeight: 600, fontSize: 14 }} key={task.issueId + task.title} defaultValue={task.title} onBlur={(e) => e.target.value.trim() && e.target.value !== task.title && p.onUpdate({ title: e.target.value.trim() })} />
           <div className="pm-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
             <span className="pm-chip">{task.status.replace(/_/g, " ")}</span>
             <span className="pm-chip">{task.priority}</span>
@@ -74,6 +74,13 @@ export function TaskEditor(p: TaskEditorProps) {
         <button className="pm-btn" onClick={p.onClose} title="Close">✕</button>
       </div>
       <div className="pm-drawer-body">
+        <div className="pm-field">
+          <label>Summary task (outline parent)</label>
+          <select className="pm-select" value={task.parentIssueId ?? ""} onChange={(e) => p.onUpdate({ parentIssueId: e.target.value || null })}>
+            <option value="">— top level —</option>
+            {plan.tasks.filter((t) => t.issueId !== task.issueId && !isDownstreamOutline(plan, task.issueId, t.issueId)).map((t) => <option key={t.issueId} value={t.issueId}>{"  ".repeat(t.outlineLevel)}{t.identifier} {t.title}</option>)}
+          </select>
+        </div>
         <div className="pm-grid2">
           <div className="pm-field">
             <label>Planned start</label>
@@ -205,6 +212,17 @@ function isDownstream(plan: PlanPayload, source: string, candidate: string): boo
     seen.add(id);
     const t = plan.tasks.find((k) => k.issueId === id);
     if (t) stack.push(...t.successors);
+  }
+  return false;
+}
+
+/** True if `candidate` is inside the outline subtree of `source`. */
+function isDownstreamOutline(plan: PlanPayload, source: string, candidate: string): boolean {
+  let cur: string | null = candidate;
+  let guard = 0;
+  while (cur && guard++ < 100) {
+    if (cur === source) return true;
+    cur = plan.tasks.find((t) => t.issueId === cur)?.parentIssueId ?? null;
   }
   return false;
 }

@@ -19,16 +19,27 @@ and see the critical path the way you would in MS Project.
 - **Resource leveling** — delays tasks (critical-first, serial method) so no resource exceeds capacity. Undo any time.
 - **Calendar** — working days, hours per day and holidays per company.
 
-## Views
+## Views (MS Project layout)
 
 | View | Contents |
 | --- | --- |
-| Gantt | Task table + timeline (day / week / month zoom), today line, weekend shading, dependency arrows, milestones, baseline bars. Drag to move, drag the right edge to resize, drag the ○ handle onto another task to link. |
-| Critical path | The chain of critical tasks, and a table of early/late start/finish, total and free float. |
-| Resources | Resource pool, weekly allocation heatmap, working calendar. |
+| Gantt Chart | Left: editable task grid with ID, Task Name, Duration, Start, Finish, Predecessors, Resource Names, % Complete and an indicator column. Right: timescale (day / week / month), blue task bars with progress line, red critical bars, black summary bars, milestone diamonds, baseline bars, dependency arrows, today line. |
+| Critical Path | The chain of critical tasks, and a table of early/late start/finish, total and free float. |
+| Resource Sheet | Editable sheet: Resource Name, Type (Human / AI agent), Paperclip identity, Initials, Group, Max Units, Hours/Day, Std Rate, Ovt Rate, Role, Active. Type a name in the last row to add. |
+| Resource Usage | Weekly hours per resource vs capacity, working calendar. |
 
-Clicking a task opens the editor: dates, duration, effort, constraint, milestone, % complete, predecessors,
-resource assignment, baseline variance, notes.
+Editing works the way it does in MS Project:
+
+- **Click a cell** to edit in place (Enter commits, Esc cancels). Task Name renames the Paperclip issue.
+- **Duration** accepts `3`, `3d`, `3 days`; `0` turns the task into a milestone. Editing **Finish** recalculates duration.
+- **Predecessors** use ID notation: `2`, `2FS+1d`, `3SS`, `5FF-2d`, comma separated.
+- **Resource Names** accepts `Name, Name[50%]`; unknown names create a new human resource, agent names link to the Paperclip agent.
+- **Outline**: right-click → Indent / Outdent (or Alt+Tab / Alt+Shift+Tab). A task with subtasks becomes a summary task with rolled-up dates, duration and % complete; links on a summary apply to all of its subtasks.
+- **Right-click** a row for Insert task above/below, Insert milestone, Mark as milestone, Task information, Delete task. `Insert` and `Delete` keys work too. The last row ("Click to add a new task…") appends.
+- **Click a dependency arrow** to change its type (FS/SS/FF/SF) and lag, or delete it. Drag the ○ handle under a bar onto another task to create an FS link.
+- **Enter** or double-click opens Task Information (constraint type, effort, notes, baseline variance, full predecessor and resource lists).
+
+Deleting a task removes it from the plan and cancels the Paperclip issue (the plugin SDK cannot hard-delete issues).
 
 ## Agent tools
 

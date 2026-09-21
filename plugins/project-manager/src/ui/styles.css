@@ -114,3 +114,38 @@
 .pm-widget a { color: inherit; }
 .pm-widget-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; font-size: 12.5px; padding: 6px 0; border-top: 1px solid var(--border); }
 .pm-widget-row:first-of-type { border-top: 0; }
+
+/* MS Project look */
+.pm-root { --pm-bar: #4f8fd6; --pm-bar-dark: #2f6db3; --pm-critical: #d9534f; --pm-critical-dark: #b23b37; --pm-progress: #0f2f5a; --pm-summary: var(--foreground); --pm-link: var(--muted-foreground); --pm-grid: color-mix(in oklab, var(--border) 60%, transparent); --pm-head-bg: var(--muted); --pm-row-sel: color-mix(in oklab, var(--pm-bar) 18%, transparent); }
+.pm-gantt { outline: none; }
+.pm-gantt-left-head { background: var(--pm-head-bg); text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11.5px; }
+.pm-gantt-left-head > div { border-right: 1px solid var(--border); height: 100%; display: flex; align-items: center; }
+.pm-gantt-row > div, .pm-gantt-row > .pm-cell { border-right: 1px solid var(--pm-grid); height: 100%; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-gantt-row { cursor: default; }
+.pm-gantt-row .pm-cell { cursor: text; width: 100%; }
+.pm-gantt-row .pm-cell:hover { background: color-mix(in oklab, var(--accent) 60%, transparent); }
+.pm-cell-input { width: 100%; height: 100%; border: 2px solid var(--pm-bar); background: var(--background); color: var(--foreground); font: inherit; padding: 0 4px; outline: none; }
+.pm-cell-select { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; height: 24px; }
+.pm-name-cell { gap: 2px; }
+.pm-twisty { border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; width: 14px; padding: 0; font-size: 11px; flex: none; }
+.pm-twisty-space { display: inline-block; width: 14px; flex: none; }
+.pm-bold { font-weight: 600; }
+.pm-summary-row { font-weight: 600; }
+.pm-ind { justify-content: center; font-size: 11px; color: var(--muted-foreground); }
+.pm-rownum { justify-content: flex-end; background: var(--pm-head-bg); }
+.pm-new-row { color: var(--muted-foreground); cursor: pointer; }
+.pm-new-row:hover { background: var(--accent); }
+.pm-menu { position: fixed; z-index: 80; min-width: 220px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 10px 30px oklch(0% 0 0 / 0.25); padding: 4px; display: flex; flex-direction: column; gap: 1px; }
+.pm-menu-item { text-align: left; border: 0; background: transparent; color: inherit; padding: 6px 10px; border-radius: 4px; font-size: 12.5px; cursor: pointer; }
+.pm-menu-item:hover { background: var(--accent); }
+.pm-menu-item:disabled { opacity: 0.4; cursor: default; }
+.pm-menu-sep { height: 1px; background: var(--border); margin: 3px 4px; }
+.pm-linkedit { padding: 10px 12px; gap: 8px; min-width: 300px; }
+.pm-link { cursor: pointer; }
+.pm-link:hover path:last-child { stroke-width: 2.2; }
+.pm-sheet { display: grid; font-size: 12.5px; border-top: 1px solid var(--border); }
+.pm-sheet-head { background: var(--pm-head-bg); font-weight: 600; font-size: 11.5px; padding: 6px 6px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); position: sticky; top: 0; }
+.pm-sheet .pm-cell { min-height: 28px; display: flex; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--pm-grid); border-right: 1px solid var(--pm-grid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+.pm-sheet .pm-cell:hover { background: color-mix(in oklab, var(--accent) 60%, transparent); }
+.pm-sheet .pm-cell-input { border-width: 2px; }
+.pm-inactive .pm-cell { opacity: 0.55; }
